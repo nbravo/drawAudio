@@ -27,15 +27,14 @@
 
 <script type="text/javascript">
   // Hacks to deal with different function names in different browsers
-  window.requestAnimFrame = (function() {
+  window.requestAnimFrame = (function(){
     return window.requestAnimationFrame ||
       window.webkitRequestAnimationFrame ||
       window.mozRequestAnimationFrame ||
-      function(callback, element) {
+      function(callback, element){
         window.setTimeout(callback, 1000 / 60);
-      };
-    })();
-
+    };
+  })();
   window.AudioContext = (function(){
     return window.webkitAudioContext || window.AudioContext || window.mozAudioContext;
   })();
@@ -49,52 +48,52 @@
   var audioData = null;
   var audioPlaying = false;
   var sampleSize = 1024; // number of samples to collect before analyzing data
-  var amplitudeArray; // array to hold time domain data
+  var fftSize = 1024; // must be power of two
+  var frequencyArray; // array to hold frequency data
   // This must be hosted on the same server as this page - otherwise you get a Cross Site Scripting error
   var audioUrl = "/assets/Doctor_Who_theme_excerpt.ogg";
   // Global Variables for the Graphics
   var canvasWidth = 512;
   var canvasHeight = 256;
   var ctx;
+  var gradient;
 
   $(document).ready(function() {
     ctx = $("#canvas").get()[0].getContext("2d");
+    gradient = ctx.createLinearGradient(0,0,512,0);
+    gradient.addColorStop(0.0,'#ff0000');
+    gradient.addColorStop(0.25,'#ffff00');
+    gradient.addColorStop(0.5,'#ffffff');
+    gradient.addColorStop(1.0,'#ffffff');
     // the AudioContext is the primary 'container' for all your audio node objects
     try {
       audioContext = new AudioContext();
     } catch(e) {
       alert('Web Audio API is not supported in this browser');
     }
-
     // When the Start button is clicked, finish setting up the audio nodes, play the sound,
     // gather samples for the analysis, update the canvas
     $("#start_button").on('click', function(e) {
       e.preventDefault();
-
       // Set up the audio Analyser, the Source Buffer and javascriptNode
       setupAudioNodes();
-
-      // Set up the event handler that is triggered every time enough samples have been collected
+      // setup the event handler that is triggered every time enough samples have been collected
       // trigger the audio analysis and draw the results
       javascriptNode.onaudioprocess = function () {
-
-        // get the Time Domain data for this sample
-        analyserNode.getByteTimeDomainData(amplitudeArray);
-
+        // get the Frequency Domain data for this sample
+        analyserNode.getByteFrequencyData(frequencyArray);
         // draw the display if the audio is playing
         if (audioPlaying == true) {
-          requestAnimFrame(drawTimeDomain);
+          requestAnimFrame(drawFrequencyDomain);
         }
       }
-
       // Load the Audio the first time through, otherwise play it from the buffer
-      if (audioData == null) {
+      if(audioData == null) {
         loadSound(audioUrl);
       } else {
         playSound(audioData);
       }
     });
-
     // Stop the audio playing
     $("#stop_button").on('click', function(e) {
       e.preventDefault();
@@ -106,17 +105,18 @@
   function setupAudioNodes() {
     sourceNode = audioContext.createBufferSource();
     analyserNode = audioContext.createAnalyser();
+    analyserNode.smoothingTimeConstant = 0.0;
+    analyserNode.fftSize = fftSize;
     javascriptNode = audioContext.createScriptProcessor(sampleSize, 1, 1);
-
     // Create the array for the data values
-    amplitudeArray = new Uint8Array(analyserNode.frequencyBinCount);
-
+    frequencyArray = new Uint8Array(analyserNode.frequencyBinCount);
     // Now connect the nodes together
     sourceNode.connect(audioContext.destination);
     sourceNode.connect(analyserNode);
     analyserNode.connect(javascriptNode);
     javascriptNode.connect(audioContext.destination);
   }
+
   // Load the audio from the URL via Ajax and store it in global variable audioData
   // Note that the audio load is asynchronous
   function loadSound(url) {
@@ -130,7 +130,7 @@
       playSound(audioData);
       }, onError);
     }
-    request.send();
+  request.send();
   }
 
   // Play the audio and loop until stopped
@@ -145,17 +145,17 @@
     console.log(e);
   }
 
-  function drawTimeDomain() {
+  function drawFrequencyDomain() {
     clearCanvas();
-    for (var i = 0; i < amplitudeArray.length; i++) {
-      var value = amplitudeArray[i] / 256;
-      var y = canvasHeight - (canvasHeight * value) - 1;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(i, y, 1, 1);
+    for (var i = 0; i < frequencyArray.length; i++) {
+      ctx.fillStyle = '#000000';
+      var y = canvasHeight - Math.round(frequencyArray[i]);
+      ctx.fillRect(i,0,1,y);
     }
   }
 
   function clearCanvas() {
-    ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
   }
 </script>
