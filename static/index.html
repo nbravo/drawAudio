@@ -1,7 +1,9 @@
 <head>
   <script src="jquery.js"></script>
+  <script src="chroma.js"></script>
 </head>
-<canvas id="canvas" width="512" height="256" ></canvas>
+
+<canvas id="canvas" width="800" height="256"></canvas>
 
 <p id="controls">
   <input type="button" id="start_button" value="Start">
@@ -27,14 +29,15 @@
 
 <script type="text/javascript">
   // Hacks to deal with different function names in different browsers
-  window.requestAnimFrame = (function(){
+  window.requestAnimFrame = (function() {
     return window.requestAnimationFrame ||
-      window.webkitRequestAnimationFrame ||
-      window.mozRequestAnimationFrame ||
-      function(callback, element){
-        window.setTimeout(callback, 1000 / 60);
+    window.webkitRequestAnimationFrame ||
+    window.mozRequestAnimationFrame ||
+    function(callback, element) {
+      window.setTimeout(callback, 1000 / 60);
     };
   })();
+
   window.AudioContext = (function(){
     return window.webkitAudioContext || window.AudioContext || window.mozAudioContext;
   })();
@@ -47,55 +50,58 @@
   var javascriptNode;
   var audioData = null;
   var audioPlaying = false;
-  var sampleSize = 1024; // number of samples to collect before analyzing data
+  var sampleSize = 1024; // number of samples to collect before analyzing FFT
   var fftSize = 1024; // must be power of two
   var frequencyArray; // array to hold frequency data
-  // This must be hosted on the same server as this page - otherwise you get a Cross Site Scripting error
   var audioUrl = "/assets/Doctor_Who_theme_excerpt.ogg";
-  // Global Variables for the Graphics
-  var canvasWidth = 512;
+
+  // Global Variables for Drawing
+  var column = 0;
+  var canvasWidth = 800;
   var canvasHeight = 256;
   var ctx;
-  var gradient;
 
+  // Uses the chroma.js library by Gregor Aisch to create a color gradient
+  // download from https://github.com/gka/chroma.js
+  var colorScale = new chroma.scale(['black', 'red', 'yellow', 'white']).out('hex');
   $(document).ready(function() {
+    // get the context from the canvas to draw on
     ctx = $("#canvas").get()[0].getContext("2d");
-    gradient = ctx.createLinearGradient(0,0,512,0);
-    gradient.addColorStop(0.0,'#ff0000');
-    gradient.addColorStop(0.25,'#ffff00');
-    gradient.addColorStop(0.5,'#ffffff');
-    gradient.addColorStop(1.0,'#ffffff');
     // the AudioContext is the primary 'container' for all your audio node objects
     try {
       audioContext = new AudioContext();
     } catch(e) {
       alert('Web Audio API is not supported in this browser');
     }
-    // When the Start button is clicked, finish setting up the audio nodes, play the sound,
-    // gather samples for the analysis, update the canvas
-    $("#start_button").on('click', function(e) {
+
+    // When the Start button is clicked, finish setting up the audio nodes, play the sound and
+    // gather samples for FFT frequency analysis, draw the spectrogram
+    $("#start_button").click(function(e) {
       e.preventDefault();
-      // Set up the audio Analyser, the Source Buffer and javascriptNode
+      column = 0;
+      // Set up / reset the audio Analyser and Source Buffer
       setupAudioNodes();
       // setup the event handler that is triggered every time enough samples have been collected
-      // trigger the audio analysis and draw the results
+      // trigger the audio analysis and draw one column in the display based on the results
       javascriptNode.onaudioprocess = function () {
         // get the Frequency Domain data for this sample
         analyserNode.getByteFrequencyData(frequencyArray);
-        // draw the display if the audio is playing
+        // draw one column of the spectrogram if the audio is playing
         if (audioPlaying == true) {
-          requestAnimFrame(drawFrequencyDomain);
+          requestAnimFrame(drawSpectrogram);
         }
       }
       // Load the Audio the first time through, otherwise play it from the buffer
-      if(audioData == null) {
+      // Note that the audio load is asynchronous
+      if (audioData == null) {
         loadSound(audioUrl);
       } else {
         playSound(audioData);
       }
     });
+
     // Stop the audio playing
-    $("#stop_button").on('click', function(e) {
+    $("#stop_button").click(function(e) {
       e.preventDefault();
       sourceNode.stop(0);
       audioPlaying = false;
@@ -108,8 +114,10 @@
     analyserNode.smoothingTimeConstant = 0.0;
     analyserNode.fftSize = fftSize;
     javascriptNode = audioContext.createScriptProcessor(sampleSize, 1, 1);
+
     // Create the array for the data values
     frequencyArray = new Uint8Array(analyserNode.frequencyBinCount);
+
     // Now connect the nodes together
     sourceNode.connect(audioContext.destination);
     sourceNode.connect(analyserNode);
@@ -117,8 +125,7 @@
     javascriptNode.connect(audioContext.destination);
   }
 
-  // Load the audio from the URL via Ajax and store it in global variable audioData
-  // Note that the audio load is asynchronous
+  // Load the sound from the URL only once and store it in global variable audioData
   function loadSound(url) {
     var request = new XMLHttpRequest();
     request.open('GET', url, true);
@@ -126,14 +133,14 @@
     // When loaded, decode the data and play the sound
     request.onload = function () {
       audioContext.decodeAudioData(request.response, function (buffer) {
-      audioData = buffer;
-      playSound(audioData);
+        audioData = buffer;
+        playSound(audioData);
       }, onError);
     }
-  request.send();
+    request.send();
   }
 
-  // Play the audio and loop until stopped
+  // Play the sound with no delay and loop over the sample until stopped
   function playSound(buffer) {
     sourceNode.buffer = buffer;
     sourceNode.start(0); // Play the sound now
@@ -145,17 +152,23 @@
     console.log(e);
   }
 
-  function drawFrequencyDomain() {
-    clearCanvas();
+  // Draw the Spectrogram from the frequency array
+  // The array has 512 elements - but truncate at 256
+  function drawSpectrogram() {
     for (var i = 0; i < frequencyArray.length; i++) {
-      ctx.fillStyle = '#000000';
-      var y = canvasHeight - Math.round(frequencyArray[i]);
-      ctx.fillRect(i,0,1,y);
+      // Get the color from the color map, draw 1x1 pixel rectangle
+      ctx.fillStyle = colorScale(frequencyArray[i] / 256.0);
+      ctx.fillRect(column,canvasHeight - i, 1, 1);
+    }
+    // loop around the canvas when we reach the end
+    column += 1;
+    if (column >= canvasWidth) {
+      column = 0;
+      clearCanvas();
     }
   }
 
   function clearCanvas() {
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+    ctx.clearRect(0, 0, canvasWidth, canvasHeight);
   }
 </script>
